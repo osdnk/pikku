@@ -53,8 +53,7 @@ directory.
 
 ## Scripts
 
-Run the Sage files with `sage scripts/<name>.sage`, the Python ones with
-`python3 scripts/<name>.py`.
+Run these with `sage scripts/<name>.sage`.
 
 - `almost_splitting_table.sage` — the degree-128 almost-splitting sampler
   table: primality and order checks, weight selection, and the operator-norm
@@ -66,6 +65,3 @@ Run the Sage files with `sage scripts/<name>.sage`, the Python ones with
   `ternary_jl_parameters.ipynb`.
 - `sampler_parameters.sage` — the degree-128, weight-32 invertibility error,
   in interval arithmetic.
-- `finite_certificate.py`, `verify_bounds.py` — the earlier floating-point
-  explorations of the same envelope and tail bounds, kept as an independent
-  cross-check of the notebook.
