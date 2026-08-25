@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "almost-splitting-rokoko"
+name = "approximate-strong-sampling"
 version = "0.1.0"
 dependencies = [
  "incomplete-rexl",

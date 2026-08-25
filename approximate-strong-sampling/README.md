@@ -1,4 +1,4 @@
-# Almost-splitting sampler experiment
+# Approximate strong sampling experiment
 
 This experiment estimates the `epsilon_C` column for
 `tab:selected-almost-splitting-primes` in `easy_sampler.tex`.
