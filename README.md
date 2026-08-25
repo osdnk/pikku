@@ -48,8 +48,9 @@ directory.
   pinned `lattice-estimator/` submodule and records the commit it used.
 - `ternary_jl_parameters.ipynb` — the branch-and-bound certificate for the
   ternary Johnson–Lindenstrauss envelope, and the parameter generator for
-  arbitrary security levels and row counts. The paper's rounded values are
-  re-checked here at 200 bits of precision.
+  arbitrary security levels and row counts. Its final cell re-checks the five
+  rounded parameter sets printed in the paper, and the modular inequalities
+  they have to satisfy, at 200 bits of precision.
 
 ## Scripts
 
@@ -60,8 +61,5 @@ Run these with `sage scripts/<name>.sage`.
   distribution.
 - `operator_norm_rejection.sage` — the operator-norm rejection cutoffs of
   `tab:operator-norm-rejection` in degrees 64, 128 and 256.
-- `parameters.sage` — re-checks the five rounded ternary-JL parameter sets
-  printed in the paper. The full certificate lives in
-  `ternary_jl_parameters.ipynb`.
 - `sampler_parameters.sage` — the degree-128, weight-32 invertibility error,
   in interval arithmetic.
