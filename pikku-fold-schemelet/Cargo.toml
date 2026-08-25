@@ -1,0 +1,15 @@
+[package]
+name = "pikku-fold-schemelet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rokoko = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", branch = "main" }
+incomplete-rexl = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", branch = "main" }
+
+[features]
+derived-key = []
+default = ["unsafe-sumcheck", "incomplete-rexl"]
+incomplete-rexl = ["rokoko/incomplete-rexl"]
+unsafe-sumcheck = ["rokoko/unsafe-sumcheck"]
+

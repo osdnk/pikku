@@ -1,0 +1,4 @@
+target/
+*.sage.py
+.ipynb_checkpoints/
+__pycache__/
