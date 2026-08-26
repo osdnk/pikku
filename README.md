@@ -5,7 +5,7 @@ Every table and every finite calculation in the paper is reproduced by something
 
 ```
 pikku-fold-schemelet/        Rust implementation of one fold (benchmarks)
-approximate-strong-sampling/ Rust sampler experiment (non-unit differences)
+approximate-strong-sampling/ Rust sampler experiment (pointwise non-unit estimates)
 estimates.ipynb              Sage notebook: commitment ranks, knowledge error, proof sizes
 ternary_jl_parameters.ipynb  Sage notebook: ternary-JL certificate and parameter generation
 scripts/                     Sage scripts for the remaining tables
@@ -29,11 +29,11 @@ files build with `target-cpu=native`.
   batched ring sumcheck. Produces the runtimes and communication of
   `tab:performance-runtimes`. `cargo run --release -- --log-m 10` is a smoke
   test; `cargo run --release` runs the configured size.
-- `approximate-strong-sampling/` — samples pairs from the fixed-weight
-  challenge set over almost-splitting primes and counts how often their
-  difference is a non-unit, giving the observed `epsilon_C` of
-  `tab:selected-almost-splitting-primes`. The committed `results-2pow24.csv`
-  is the output used in the paper.
+- `approximate-strong-sampling/` — samples from the fixed-weight challenge set
+  over almost-splitting primes after operator-norm rejection, uses slot
+  histograms to find high-mass anchors, and directly estimates the non-unit
+  probability against those anchors for `tab:selected-almost-splitting-primes`.
+  The committed `results-2pow24.csv` is the output used in the paper.
 
 Each crate has its own README with the parameters it defaults to.
 
