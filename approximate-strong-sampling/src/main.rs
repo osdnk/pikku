@@ -5,11 +5,13 @@ use rand::rngs::SmallRng;
 use rand::SeedableRng;
 use rayon::prelude::*;
 use sampler::{sample_challenge, Challenge, DEGREE, HALF_DEGREE};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::time::Instant;
 
 const DEFAULT_SAMPLES: u64 = 1 << 22;
 const CHUNK_SIZE: u64 = 1 << 14;
 const BASE_SEED: u64 = 0x5049_4b4b_552d_4550;
+const TOP_ANCHORS: usize = 16;
 
 #[derive(Clone, Copy)]
 struct Row {
@@ -80,8 +82,13 @@ impl Fq2 {
     const ZERO: Self = Self { a: 0, b: 0 };
     const ONE: Self = Self { a: 1, b: 0 };
 
+    #[cfg(test)]
     fn is_zero(self) -> bool {
         self.a == 0 && self.b == 0
+    }
+
+    fn dense_index(self, q: u64) -> usize {
+        (self.a * q + self.b) as usize
     }
 }
 
@@ -215,6 +222,20 @@ impl SlotSystem {
         Self { field, powers }
     }
 
+    fn evaluate_slots_into(&self, challenge: &Challenge, out: &mut [Fq2; HALF_DEGREE]) {
+        for (value, slot_powers) in out.iter_mut().zip(&self.powers) {
+            let mut acc = Fq2::ZERO;
+            for i in 0..challenge.weight {
+                let p = challenge.positions[i] as usize;
+                acc = self
+                    .field
+                    .add_signed(acc, challenge.signs[i], slot_powers[p]);
+            }
+            *value = acc;
+        }
+    }
+
+    #[cfg(test)]
     fn non_unit_difference(&self, left: &Challenge, right: &Challenge) -> bool {
         for slot_powers in &self.powers {
             let mut acc = Fq2::ZERO;
@@ -232,22 +253,32 @@ impl SlotSystem {
         }
         false
     }
+
+    fn has_matching_slot(&self, left: &Challenge, right_slots: &[Fq2; HALF_DEGREE]) -> bool {
+        for (slot_powers, &right_slot) in self.powers.iter().zip(right_slots) {
+            let mut acc = Fq2::ZERO;
+            for i in 0..left.weight {
+                let p = left.positions[i] as usize;
+                acc = self.field.add_signed(acc, left.signs[i], slot_powers[p]);
+            }
+            if acc == right_slot {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[derive(Default, Clone, Copy)]
 struct Counts {
-    tests: u64,
-    non_units: u64,
-    equal_resamples: u64,
+    samples: u64,
     sampler_attempts: u64,
 }
 
 impl Counts {
     fn add(self, other: Counts) -> Counts {
         Counts {
-            tests: self.tests + other.tests,
-            non_units: self.non_units + other.non_units,
-            equal_resamples: self.equal_resamples + other.equal_resamples,
+            samples: self.samples + other.samples,
             sampler_attempts: self.sampler_attempts + other.sampler_attempts,
         }
     }
@@ -256,13 +287,51 @@ impl Counts {
 struct ResultRow {
     row: Row,
     counts: Counts,
+    anchor_samples: u64,
+    direct_samples: u64,
+    top_anchors: Vec<AnchorCandidate>,
+    direct_counts: Vec<DirectCounts>,
+    max_slot_count: u16,
+    max_slot: usize,
     seconds: f64,
 }
 
-fn run_row(row: Row, samples: u64) -> ResultRow {
+#[derive(Clone)]
+struct AnchorCandidate {
+    challenge: Challenge,
+    score_count: u64,
+}
+
+#[derive(Default, Clone, Copy)]
+struct DirectCounts {
+    samples: u64,
+    non_units: u64,
+    equal: u64,
+    sampler_attempts: u64,
+}
+
+impl DirectCounts {
+    fn add(self, other: DirectCounts) -> DirectCounts {
+        DirectCounts {
+            samples: self.samples + other.samples,
+            non_units: self.non_units + other.non_units,
+            equal: self.equal + other.equal,
+            sampler_attempts: self.sampler_attempts + other.sampler_attempts,
+        }
+    }
+}
+
+fn run_row(row: Row, samples: u64, anchor_samples: u64, direct_samples: u64) -> ResultRow {
     let slots = SlotSystem::new(row.q);
+    let slot_bins = (row.q as usize) * (row.q as usize);
+    let bins = HALF_DEGREE
+        .checked_mul(slot_bins)
+        .expect("slot histogram is too large");
+    let histograms: Vec<_> = (0..bins).map(|_| AtomicU16::new(0)).collect();
+    let max_observed = AtomicU64::new(0);
     let started = Instant::now();
     let chunks = samples.div_ceil(CHUNK_SIZE);
+
     let counts = (0..chunks)
         .into_par_iter()
         .map(|chunk| {
@@ -270,28 +339,172 @@ fn run_row(row: Row, samples: u64) -> ResultRow {
             let len = CHUNK_SIZE.min(samples - start);
             let mut rng = SmallRng::seed_from_u64(BASE_SEED ^ row.q.rotate_left(17) ^ chunk);
             let mut counts = Counts::default();
+            let mut slot_values = [Fq2::ZERO; HALF_DEGREE];
 
-            while counts.tests < len {
-                let (left, left_attempts) = sample_challenge(&mut rng, row.weight, row.bound);
-                let (right, right_attempts) = sample_challenge(&mut rng, row.weight, row.bound);
-                counts.sampler_attempts += left_attempts + right_attempts;
-                if left == right {
-                    counts.equal_resamples += 1;
-                    continue;
-                }
-                counts.tests += 1;
-                if slots.non_unit_difference(&left, &right) {
-                    counts.non_units += 1;
+            while counts.samples < len {
+                let (challenge, attempts) = sample_challenge(&mut rng, row.weight, row.bound);
+                counts.samples += 1;
+                counts.sampler_attempts += attempts;
+                slots.evaluate_slots_into(&challenge, &mut slot_values);
+                for (slot, &value) in slot_values.iter().enumerate() {
+                    let histogram_index = slot * slot_bins + value.dense_index(row.q);
+                    let previous = histograms[histogram_index].fetch_add(1, Ordering::Relaxed);
+                    assert!(previous < u16::MAX, "histogram counter overflow");
+                    update_max(&max_observed, previous + 1, slot);
                 }
             }
             counts
         })
         .reduce(Counts::default, Counts::add);
 
+    let encoded_max = max_observed.load(Ordering::Relaxed);
+    let top_anchors = top_anchors(row, &slots, &histograms, slot_bins, anchor_samples);
+    let direct_counts = direct_against_anchors(row, &slots, &top_anchors, direct_samples);
+
     ResultRow {
         row,
         counts,
+        anchor_samples,
+        direct_samples,
+        top_anchors,
+        direct_counts,
+        max_slot_count: (encoded_max >> 32) as u16,
+        max_slot: (encoded_max & 0xffff_ffff) as usize,
         seconds: started.elapsed().as_secs_f64(),
+    }
+}
+
+fn top_anchors(
+    row: Row,
+    slots: &SlotSystem,
+    histograms: &[AtomicU16],
+    slot_bins: usize,
+    anchor_samples: u64,
+) -> Vec<AnchorCandidate> {
+    assert!(anchor_samples > 0);
+    let chunks = anchor_samples.div_ceil(CHUNK_SIZE);
+    (0..chunks)
+        .into_par_iter()
+        .map(|chunk| {
+            let start = chunk * CHUNK_SIZE;
+            let len = CHUNK_SIZE.min(anchor_samples - start);
+            let mut rng = SmallRng::seed_from_u64(
+                BASE_SEED ^ row.q.rotate_left(17) ^ 0xa4c3_686f_7253_4545 ^ chunk,
+            );
+            let mut slot_values = [Fq2::ZERO; HALF_DEGREE];
+            let mut best = Vec::with_capacity(TOP_ANCHORS);
+
+            for _ in 0..len {
+                let (anchor, _) = sample_challenge(&mut rng, row.weight, row.bound);
+                slots.evaluate_slots_into(&anchor, &mut slot_values);
+                let score_count: u64 = slot_values
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, &value)| {
+                        let histogram_index = slot * slot_bins + value.dense_index(row.q);
+                        histograms[histogram_index].load(Ordering::Relaxed) as u64
+                    })
+                    .sum();
+                insert_anchor_candidate(
+                    &mut best,
+                    AnchorCandidate {
+                        challenge: anchor,
+                        score_count,
+                    },
+                );
+            }
+            best
+        })
+        .reduce_with(|mut left, right| {
+            for candidate in right {
+                insert_anchor_candidate(&mut left, candidate);
+            }
+            left
+        })
+        .expect("at least one anchor chunk is present")
+}
+
+fn insert_anchor_candidate(best: &mut Vec<AnchorCandidate>, candidate: AnchorCandidate) {
+    if best
+        .iter()
+        .any(|other| other.challenge == candidate.challenge)
+    {
+        return;
+    }
+    let position = best
+        .iter()
+        .position(|other| candidate.score_count > other.score_count)
+        .unwrap_or(best.len());
+    if position < TOP_ANCHORS {
+        best.insert(position, candidate);
+        best.truncate(TOP_ANCHORS);
+    } else if best.len() < TOP_ANCHORS {
+        best.push(candidate);
+    }
+}
+
+fn direct_against_anchors(
+    row: Row,
+    slots: &SlotSystem,
+    anchors: &[AnchorCandidate],
+    direct_samples: u64,
+) -> Vec<DirectCounts> {
+    assert!(direct_samples > 0);
+    assert!(!anchors.is_empty());
+    let mut anchor_slots = vec![[Fq2::ZERO; HALF_DEGREE]; anchors.len()];
+    for (out, anchor) in anchor_slots.iter_mut().zip(anchors) {
+        slots.evaluate_slots_into(&anchor.challenge, out);
+    }
+    let chunks = direct_samples.div_ceil(CHUNK_SIZE);
+    (0..chunks)
+        .into_par_iter()
+        .map(|chunk| {
+            let start = chunk * CHUNK_SIZE;
+            let len = CHUNK_SIZE.min(direct_samples - start);
+            let mut rng = SmallRng::seed_from_u64(
+                BASE_SEED ^ row.q.rotate_left(17) ^ 0xd15e_c7c0_ffee_0000 ^ chunk,
+            );
+            let mut counts = vec![DirectCounts::default(); anchors.len()];
+            for _ in 0..len {
+                let (challenge, attempts) = sample_challenge(&mut rng, row.weight, row.bound);
+                for ((counts, anchor), anchor_slots) in
+                    counts.iter_mut().zip(anchors).zip(&anchor_slots)
+                {
+                    counts.samples += 1;
+                    counts.sampler_attempts += attempts;
+                    if challenge == anchor.challenge {
+                        counts.equal += 1;
+                    } else if slots.has_matching_slot(&challenge, anchor_slots) {
+                        counts.non_units += 1;
+                    }
+                }
+            }
+            counts
+        })
+        .reduce(
+            || vec![DirectCounts::default(); anchors.len()],
+            |mut left, right| {
+                for (left, right) in left.iter_mut().zip(right) {
+                    *left = left.add(right);
+                }
+                left
+            },
+        )
+}
+
+fn update_max(max_observed: &AtomicU64, count: u16, slot: usize) {
+    let encoded = ((count as u64) << 32) | slot as u64;
+    let mut current = max_observed.load(Ordering::Relaxed);
+    while encoded > current {
+        match max_observed.compare_exchange_weak(
+            current,
+            encoded,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
     }
 }
 
@@ -337,82 +550,141 @@ fn is_prime(n: u64) -> bool {
     true
 }
 
-fn parse_samples() -> u64 {
+fn parse_args() -> (u64, Option<u64>, Option<u64>) {
     let mut args = std::env::args().skip(1);
     let mut samples = DEFAULT_SAMPLES;
+    let mut anchor_samples = None;
+    let mut direct_samples = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--samples" => {
                 let value = args.next().expect("--samples requires a value");
                 samples = value.parse().expect("invalid --samples value");
             }
+            "--anchor-samples" => {
+                let value = args.next().expect("--anchor-samples requires a value");
+                anchor_samples = Some(value.parse().expect("invalid --anchor-samples value"));
+            }
+            "--direct-samples" => {
+                let value = args.next().expect("--direct-samples requires a value");
+                direct_samples = Some(value.parse().expect("invalid --direct-samples value"));
+            }
             "--help" | "-h" => {
-                println!("usage: cargo run --release -- [--samples N]");
+                println!(
+                    "usage: cargo run --release -- [--samples N] [--anchor-samples N] [--direct-samples N]"
+                );
                 std::process::exit(0);
             }
             _ => panic!("unknown argument: {arg}"),
         }
     }
-    samples
+    (samples, anchor_samples, direct_samples)
 }
 
-fn format_epsilon(non_units: u64, tests: u64) -> String {
-    if non_units == 0 {
-        format!("<2^{{-{:.3}}}", (tests as f64).log2())
-    } else {
-        let epsilon = non_units as f64 / tests as f64;
-        format!("\\approx2^{{{:.3}}}", epsilon.log2())
-    }
+fn format_power_of_two(value: f64) -> String {
+    format!("\\approx2^{{{:.3}}}", value.log2())
 }
 
 fn main() {
     sampler::require_avx512();
-    let samples = parse_samples();
+    let (samples, anchor_samples, direct_samples) = parse_args();
+    let anchor_samples = anchor_samples.unwrap_or(samples);
+    let direct_samples = direct_samples.unwrap_or(samples);
     println!("samples_per_row={samples}");
+    println!("anchor_samples_per_row={anchor_samples}");
+    println!("direct_samples_per_row={direct_samples}");
     println!(
-        "q,s,B,tests,non_units,epsilon,minus_log2_epsilon,heuristic_log2,avg_sampler_attempts,equal_resamples,seconds"
+        "q,s,B,samples,anchor_samples,direct_samples,max_slot,max_slot_count,max_slot_probability,q2_max_slot_probability,union_epsilon_bound,minus_log2_union_bound,best_anchor_score_bound,minus_log2_best_anchor_score,best_direct_non_units,best_direct_epsilon,minus_log2_best_direct_epsilon,best_direct_equal,worst_direct_rank,worst_direct_anchor_score,worst_direct_epsilon,minus_log2_worst_direct_epsilon,heuristic_log2,avg_sampler_attempts,avg_direct_sampler_attempts,worst_direct_anchor,seconds"
     );
 
     let results: Vec<_> = ROWS
         .iter()
         .copied()
-        .map(|row| run_row(row, samples))
+        .map(|row| run_row(row, samples, anchor_samples, direct_samples))
         .collect();
 
     for result in &results {
-        let epsilon = result.counts.non_units as f64 / result.counts.tests as f64;
-        let minus_log2 = if result.counts.non_units == 0 {
-            f64::INFINITY
-        } else {
-            -epsilon.log2()
-        };
-        let avg_attempts =
-            result.counts.sampler_attempts as f64 / (2.0 * result.counts.tests as f64);
+        let max_probability = result.max_slot_count as f64 / result.counts.samples as f64;
+        let q2_max_probability = (result.row.q * result.row.q) as f64 * max_probability;
+        let epsilon_bound = HALF_DEGREE as f64 * max_probability;
+        let best_anchor_score =
+            result.top_anchors[0].score_count as f64 / result.counts.samples as f64;
+        let best_direct_counts = result.direct_counts[0];
+        let best_direct_epsilon =
+            best_direct_counts.non_units as f64 / best_direct_counts.samples as f64;
+        let (worst_direct_rank, worst_direct_counts) = result
+            .direct_counts
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, counts)| counts.non_units)
+            .expect("at least one direct count");
+        let worst_direct_anchor_score =
+            result.top_anchors[worst_direct_rank].score_count as f64 / result.counts.samples as f64;
+        let worst_direct_epsilon =
+            worst_direct_counts.non_units as f64 / worst_direct_counts.samples as f64;
+        let avg_attempts = result.counts.sampler_attempts as f64 / result.counts.samples as f64;
+        let avg_direct_attempts =
+            best_direct_counts.sampler_attempts as f64 / best_direct_counts.samples as f64;
         println!(
-            "{},{},{:.1},{},{},{:.12e},{:.6},{:.3},{:.6},{},{:.3}",
+            "{},{},{:.1},{},{},{},{},{},{:.12e},{:.6},{:.12e},{:.6},{:.12e},{:.6},{},{:.12e},{:.6},{},{},{:.12e},{:.12e},{:.6},{:.3},{:.6},{:.6},{},{:.3}",
             result.row.q,
             result.row.weight,
             result.row.bound,
-            result.counts.tests,
-            result.counts.non_units,
-            epsilon,
-            minus_log2,
+            result.counts.samples,
+            result.anchor_samples,
+            result.direct_samples,
+            result.max_slot,
+            result.max_slot_count,
+            max_probability,
+            q2_max_probability,
+            epsilon_bound,
+            -epsilon_bound.log2(),
+            best_anchor_score,
+            -best_anchor_score.log2(),
+            best_direct_counts.non_units,
+            best_direct_epsilon,
+            -best_direct_epsilon.log2(),
+            best_direct_counts.equal,
+            worst_direct_rank,
+            worst_direct_anchor_score,
+            worst_direct_epsilon,
+            -worst_direct_epsilon.log2(),
             result.row.heuristic_exponent,
             avg_attempts,
-            result.counts.equal_resamples,
+            avg_direct_attempts,
+            format_challenge(&result.top_anchors[worst_direct_rank].challenge),
             result.seconds
         );
     }
 
     println!();
-    println!("latex_epsilon_cells");
+    println!("latex_cells");
     for result in &results {
+        let max_probability = result.max_slot_count as f64 / result.counts.samples as f64;
+        let q2_max_probability = (result.row.q * result.row.q) as f64 * max_probability;
+        let epsilon_bound = HALF_DEGREE as f64 * max_probability;
+        let anchor_score = result.top_anchors[0].score_count as f64 / result.counts.samples as f64;
+        let direct_epsilon = result
+            .direct_counts
+            .iter()
+            .map(|counts| counts.non_units as f64 / counts.samples as f64)
+            .fold(0.0f64, f64::max);
         println!(
-            "q={} & {} \\\\",
+            "q={} & ${:.3}$ & ${}$ & ${}$ & ${}$ \\\\",
             result.row.q,
-            format_epsilon(result.counts.non_units, result.counts.tests)
+            q2_max_probability,
+            format_power_of_two(epsilon_bound),
+            format_power_of_two(anchor_score),
+            format_power_of_two(direct_epsilon)
         );
     }
+}
+
+fn format_challenge(challenge: &Challenge) -> String {
+    (0..challenge.weight)
+        .map(|i| format!("{}:{:+}", challenge.positions[i], challenge.signs[i]))
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 #[cfg(test)]

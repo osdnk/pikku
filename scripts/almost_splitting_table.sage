@@ -25,8 +25,8 @@ calculation.
    five-bit margin, and expected-trial conditions.
 
 The final error-exponent column is log_2(64/q^2), since e = 2 and the number of
-NTT slots is phi/e = 64.  Thus it corresponds to the heuristic union-bound
-scale phi/(e q^e).
+NTT slots is phi/e = 64.  This is the pointwise scale derived from one
+quadratic-slot value having probability about q^-2.
 """
 
 from itertools import combinations, islice

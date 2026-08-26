@@ -1,6 +1,6 @@
 # Approximate strong sampling experiment
 
-This experiment estimates the `epsilon_C` column for
+This experiment estimates the pointwise non-unit column for
 `tab:selected-almost-splitting-primes` in `easy_sampler.tex`.
 
 It depends on Rokoko's `incomplete-rexl` crate for modular field
@@ -14,8 +14,13 @@ The sampler is AVX-512-only and the local Cargo config builds with
 Run:
 
 ```sh
-cargo run --release -- --samples 16777216
+cargo run --release -- --samples 16777216 --anchor-samples 16777216 --direct-samples 16777216
 ```
+
+The program first builds slot histograms from accepted challenges. It then
+samples anchors, keeps the 16 anchors with largest histogram score, and directly
+measures the non-unit probability against each of those anchors on a fresh
+sample batch.
 
 The default sample count is `2^22`. The program prints CSV and LaTeX rows.
 The committed `results-2pow24.csv` file is the output used for the table.
