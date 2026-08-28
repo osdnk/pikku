@@ -7,10 +7,10 @@ claims.
 Defaults:
 
 - `m = 2^20`
-- `rank = 14`
+- `rank = 15`
 - Rokoko prime `q = 1125899906839937`
 - two fresh inputs plus one accumulator
-- witness coefficients bounded by `2^7`, sampled with Rokoko's `sample_random_short_vector`
+- witness coefficients bounded by `2^5`, sampled with Rokoko's `sample_random_short_vector`
 - unstructured dense commitment key sampled uniformly
 - fold challenges use the degree-128 fixed-weight sampler row
   `s = 23, gamma <= 8.357` from `easy_sampler.tex`, sampled with Rokoko's
