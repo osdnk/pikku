@@ -5,7 +5,7 @@ pub(crate) const DEFAULT_LOG_M: usize = 20;
 // at INPUT_COEFF_INFINITY_BOUND = 2^4.
 pub(crate) fn commitment_rank(m: usize) -> usize {
     match m.ilog2() {
-        ..=18 => 14,
+        ..=20 => 14,
         _ => 15,
     }
 }
