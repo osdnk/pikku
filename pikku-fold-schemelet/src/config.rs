@@ -1,8 +1,8 @@
 use rokoko::common::config::DEGREE;
 
 pub(crate) const DEFAULT_LOG_M: usize = 20;
-// Ranks from the parameter estimates, set for 32 sequential folding rounds
-// at INPUT_COEFF_INFINITY_BOUND = 2^5.
+// Ranks from the practical estimates: 16 sequential folds with coefficients
+// sampled uniformly from [-2^3, 2^3].
 pub(crate) fn commitment_rank(m: usize) -> usize {
     match m.ilog2() {
         ..=18 => 14,
@@ -16,8 +16,7 @@ pub(crate) const FOLD_INPUTS: usize = FRESH_INPUTS + ACCUMULATORS;
 pub(crate) const ACCUMULATOR_COL: usize = FRESH_INPUTS;
 pub(crate) const FRESH_SELECTOR_VARS: usize = FRESH_INPUTS.ilog2() as usize;
 const _: () = assert!(FRESH_INPUTS.is_power_of_two());
-// INPUT_COEFF_INFINITY_BOUND = 2^5 in the parameter estimates.
-pub(crate) const WITNESS_COEFF_BOUND: u64 = 32;
+pub(crate) const WITNESS_COEFF_BOUND: u64 = 1 << 3;
 pub(crate) const FOLD_CHALLENGE_WEIGHT: usize = 23;
 pub(crate) const FOLD_CHALLENGE_OP_NORM_BOUND: f64 = 8.357;
 pub(crate) const FOLD_CHALLENGE_LABEL: &[u8] = b"pikku-fold-fixed-weight-challenge";
@@ -29,7 +28,7 @@ pub(crate) const PROJECTION_BATCH_POINTS: usize = 2;
 pub(crate) const JL_UPPER_TAIL_BETA: f64 = 343.2;
 
 pub(crate) fn witness_norm_bound(m: usize) -> f64 {
-    ((m * DEGREE) as f64).sqrt() * (WITNESS_COEFF_BOUND - 1) as f64
+    ((m * DEGREE) as f64).sqrt() * WITNESS_COEFF_BOUND as f64
 }
 
 pub(crate) fn folded_norm_bound(m: usize) -> f64 {
