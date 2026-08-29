@@ -6,10 +6,10 @@ edition = "2021"
 [dependencies]
 rokoko = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", branch = "main" }
 incomplete-rexl = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", branch = "main" }
+rand = "0.9.2"
 
 [features]
 derived-key = []
 default = ["unsafe-sumcheck", "incomplete-rexl"]
 incomplete-rexl = ["rokoko/incomplete-rexl"]
 unsafe-sumcheck = ["rokoko/unsafe-sumcheck"]
-
