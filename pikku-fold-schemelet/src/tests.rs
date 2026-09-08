@@ -301,3 +301,37 @@ fn soa_eq_expansion_and_dot_match_reference() {
     let other_reference = expand_eq_qe(&other_layers);
     assert_eq!(soa.dot(&other), dot_qe(&reference, &other_reference));
 }
+
+#[test]
+fn slot_batcher_matches_slot_batch() {
+    use crate::field_sumcheck::{delta_times, SlotBatcher};
+    use crate::sumcheck::{slot_batch, slot_batching_challenges};
+    use rokoko::common::hash::HashWrapper;
+    init_common();
+    let mut sampler = HashWrapper::new();
+    let delta = slot_batching_challenges(&mut sampler);
+    let batcher = SlotBatcher::new(&delta);
+    let t = RingElement::random(Representation::IncompleteNTT);
+    let scaled = SlotBatcher::new(&delta_times(&delta, &t));
+    for _ in 0..8 {
+        let w = RingElement::random(Representation::IncompleteNTT);
+        assert_eq!(batcher.apply(&w), slot_batch(&w, &delta));
+        let mut tw = RingElement::zero(Representation::IncompleteNTT);
+        tw *= (&t, &w);
+        assert_eq!(scaled.apply(&w), slot_batch(&tw, &delta));
+    }
+}
+
+#[test]
+fn column_evaluation_matches_claim() {
+    use crate::field_sumcheck::{diagonal_value, evaluate_column};
+    use crate::qe_vec::expand_eq_soa;
+    let f = &*FIXTURE;
+    for (col, claim) in f.instance.claims.iter().enumerate() {
+        let point: Vec<_> = claim.point.iter().map(diagonal_value).collect();
+        assert_eq!(
+            evaluate_column(f.witness.col(col), &expand_eq_soa(&point)),
+            claim.value
+        );
+    }
+}

@@ -1,10 +1,11 @@
 use crate::config::{
-    FRESH_INPUTS, FRESH_SELECTOR_VARS, PROJECTION_BATCH_POINTS, PROJECTION_LAYERS,
+    FOLD_INPUTS, FRESH_INPUTS, FRESH_SELECTOR_VARS, PROJECTION_BATCH_POINTS, PROJECTION_LAYERS,
 };
 use crate::eval_claims::{batched_claim, form_eval_claims};
+use crate::field_sumcheck::{delta_times, diagonal_value, evaluate_column, SlotBatcher};
 use crate::fold::fold_challenges;
 use crate::proj_sumcheck::{
-    accumulate_j_columns, build_l0, embed_qe, one_minus, scaled_embedded_table,
+    accumulate_j_columns, build_l0, expand_eq_qe, one_minus, scaled_embedded_table,
 };
 use crate::projection::{
     batched_projections, j_batched_vectors, project_witness, projection_shape,
@@ -21,6 +22,7 @@ use rokoko::common::config::HALF_DEGREE;
 use rokoko::common::hash::HashWrapper;
 use rokoko::common::matrix::VerticallyAlignedMatrix;
 use rokoko::common::ring_arithmetic::{QuadraticExtension, Representation, RingElement};
+use rokoko::common::sumcheck_element::SumcheckElement;
 use rokoko::protocol::fold::fold;
 use rokoko::protocol::sumcheck_utils::combiner::Combiner;
 use rokoko::protocol::sumcheck_utils::common::{HighOrderSumcheckData, SumcheckBaseData};
@@ -28,7 +30,6 @@ use rokoko::protocol::sumcheck_utils::elephant_cell::ElephantCell;
 use rokoko::protocol::sumcheck_utils::linear::LinearSumcheck;
 use rokoko::protocol::sumcheck_utils::polynomial::Polynomial;
 use rokoko::protocol::sumcheck_utils::product::ProductSumcheck;
-use rokoko::protocol::sumcheck_utils::ring_to_field_combiner::RingToFieldCombiner;
 
 #[derive(Clone)]
 pub(crate) struct FoldProof {
@@ -120,7 +121,7 @@ pub(crate) fn prove_fold(
     let (proj_batching, eval_batching) = batching.split_at(PROJECTION_BATCH_POINTS);
 
     let padded_eval_sum = batched_claim(instance, eval_batching);
-    let gadgets = form_eval_claims(m, instance, witness, eval_batching);
+    let gadgets = form_eval_claims(m, instance, witness, eval_batching, &delta);
 
     let mut gamma = RingElement::constant(1, Representation::IncompleteNTT);
     let output_vars = matrices[PROJECTION_LAYERS - 1].projection_height.ilog2() as usize;
@@ -182,7 +183,9 @@ pub(crate) fn prove_fold(
     // product factors: collapsing either into the witness table would change
     // the multilinear extension off the cube and the verifier could no longer
     // evaluate the terminal from the matrix description. One of the two is
-    // always in a dummy round, so the true round degree stays 2.
+    // always in a dummy round, so the true round degree stays 2. The witness
+    // rounds run over F_{q^2} on the slot-batched witness; t_1(r_2) folds into
+    // delta, and the ring terminal values come from one pass over the witness.
     let t1_terminal = t1_leaf.borrow().final_evaluations().clone();
     let block_vars = middle_vars - output_vars;
     let column_vars = witness_vars - block_vars;
@@ -190,46 +193,55 @@ pub(crate) fn prove_fold(
         field_points[output_vars..].iter().rev().cloned().collect();
     let s = accumulate_j_columns(&matrices[0], &expand_eq_soa(&r2_msb[block_vars..]));
     let s_leaf = ElephantCell::new(LinearSumcheck::from_data_with_prefixed_sufixed_data(
-        (0..s.len()).map(|index| embed_qe(&s.get(index))).collect(),
+        (0..s.len()).map(|index| s.get(index)).collect(),
         block_vars,
         0,
     ));
     let block_leaf = ElephantCell::new(LinearSumcheck::from_data_with_prefixed_sufixed_data(
-        scaled_embedded_table(&expand_eq_soa(&r2_msb[..block_vars]), &t1_terminal),
+        expand_eq_qe(&r2_msb[..block_vars]),
         0,
         column_vars,
     ));
     let witness_leaf = ElephantCell::new(LinearSumcheck::from_data(
-        witness.data[..FRESH_INPUTS * m].to_vec(),
+        SlotBatcher::new(&delta_times(&delta, &t1_terminal))
+            .apply_all(&witness.data[..FRESH_INPUTS * m]),
     ));
     let product_c = ElephantCell::new(ProductSumcheck::new(
         ElephantCell::new(ProductSumcheck::new(s_leaf.clone(), block_leaf.clone())),
         witness_leaf.clone(),
     ));
 
-    let one = RingElement::constant(1, Representation::IncompleteNTT);
-    let chain_children: Vec<ElephantCell<dyn HighOrderSumcheckData<Element = RingElement>>> =
-        vec![product_c, gadgets.combiner.clone()];
+    let chain_children: Vec<
+        ElephantCell<dyn HighOrderSumcheckData<Element = QuadraticExtension>>,
+    > = vec![product_c, gadgets.combiner.clone()];
     let mut final_combiner = Combiner::new(chain_children);
-    final_combiner.load_challenges_from(&[one, gamma.clone()]);
-    let mut field_combiner = RingToFieldCombiner::new(ElephantCell::new(final_combiner));
-    field_combiner.load_challenges_from(delta);
+    final_combiner.load_challenges_from(&[QuadraticExtension::one(), diagonal_value(&gamma)]);
 
     let mut chain_leaves = vec![s_leaf, block_leaf, witness_leaf];
     chain_leaves.extend(gadgets.leaves());
     let execution = execute_sumcheck_prover(
-        &field_combiner,
+        &final_combiner,
         &chain_leaves,
         witness_vars,
         &mut transcript,
     );
     round_polynomials.extend(execution.round_polynomials);
-
-    let terminal_values = gadgets.terminal_values();
-    transcript.update_with_ring_element_slice(&terminal_values);
-    drop(field_combiner);
+    drop(final_combiner);
     drop(chain_leaves);
     drop(gadgets);
+
+    let witness_point: Vec<QuadraticExtension> = execution
+        .field_points
+        .iter()
+        .rev()
+        .skip(FRESH_SELECTOR_VARS)
+        .cloned()
+        .collect();
+    let eq = expand_eq_soa(&witness_point);
+    let terminal_values: Vec<RingElement> = (0..FOLD_INPUTS)
+        .map(|col| evaluate_column(witness.col(col), &eq))
+        .collect();
+    transcript.update_with_ring_element_slice(&terminal_values);
     let sumcheck_time = sumcheck_start.elapsed();
 
     let fold_start = std::time::Instant::now();

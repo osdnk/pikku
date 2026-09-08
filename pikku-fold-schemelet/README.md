@@ -44,7 +44,13 @@ batching challenges (accumulator coefficient fixed to 1), runs the ring
 sumcheck over `log2(k m)` variables with `F_{q^2}` round challenges and
 NTT-slot batching, and reveals the per-column terminal evaluations. The
 verifier checks every round polynomial and the de-batched terminal value,
-then both parties fold: the folded instance carries the terminal sumcheck
+then both parties fold. The prover runs the witness rounds over `F_{q^2}`:
+the evaluation points, batching challenges, layer eq tables and round
+challenges are all diagonal ring elements and commute with slot batching, so
+the witness columns are slot-batched once (the ring factor `t_1(r_2)` of the
+projection term is folded into the batching vector) and the per-column ring
+terminal values come from one direct pass over the witness. Then both
+parties fold: the folded instance carries the terminal sumcheck
 point and the fold-challenge combination of the terminal evaluations. The
 final verification of the folded relation (`output.rs`) recomputes the
 folded commitment, checks the folded witness norm against
