@@ -35,6 +35,11 @@ pub(crate) fn folded_norm_bound(m: usize) -> f64 {
     witness_norm_bound(m) * (1.0 + FRESH_INPUTS as f64 * FOLD_CHALLENGE_OP_NORM_BOUND)
 }
 
+// Each product coefficient of a ternary weight-w challenge sums w witness coefficients.
+pub(crate) fn folded_coeff_bound() -> u64 {
+    WITNESS_COEFF_BOUND * (1 + FRESH_INPUTS as u64 * FOLD_CHALLENGE_WEIGHT as u64)
+}
+
 pub(crate) fn projection_norm_bound(m: usize) -> f64 {
     (FRESH_INPUTS as f64).sqrt()
         * witness_norm_bound(m)

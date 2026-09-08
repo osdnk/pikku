@@ -138,7 +138,7 @@ dependencies = [
 [[package]]
 name = "incomplete-rexl"
 version = "0.1.0"
-source = "git+ssh://git@github.com/lattice-arguments/rokoko.git?branch=main#2186075f41831bc3c4cb097097ec4851df7e455a"
+source = "git+ssh://git@github.com/lattice-arguments/rokoko.git?rev=58da08bdb4489d4ca57f00c90595c3d58484d052#58da08bdb4489d4ca57f00c90595c3d58484d052"
 dependencies = [
  "rand",
 ]
@@ -356,7 +356,7 @@ dependencies = [
 [[package]]
 name = "rokoko"
 version = "0.1.0"
-source = "git+ssh://git@github.com/lattice-arguments/rokoko.git?branch=main#2186075f41831bc3c4cb097097ec4851df7e455a"
+source = "git+ssh://git@github.com/lattice-arguments/rokoko.git?rev=58da08bdb4489d4ca57f00c90595c3d58484d052#58da08bdb4489d4ca57f00c90595c3d58484d052"
 dependencies = [
  "aes",
  "blake3",
