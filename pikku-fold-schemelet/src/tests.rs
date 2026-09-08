@@ -1,5 +1,5 @@
 use crate::commitment::CommitmentKey;
-use crate::config::{commitment_rank, folded_norm_bound, witness_norm_bound};
+use crate::config::{commitment_rank, folded_norm_bound, witness_norm_bound, WITNESS_COEFF_BOUND};
 use crate::eval::mle_evaluate;
 use crate::output::verify_output;
 use crate::prover::{prove_fold, ProverMessage};
@@ -38,6 +38,14 @@ static FIXTURE: LazyLock<Fixture> = LazyLock::new(|| {
         prover_message,
     }
 });
+
+#[test]
+fn configured_bounds_and_ranks_match_estimates() {
+    assert_eq!(WITNESS_COEFF_BOUND, 1 << 10);
+    assert_eq!(commitment_rank(1 << 18), 12);
+    assert_eq!(commitment_rank(1 << 20), 12);
+    assert_eq!(commitment_rank(1 << 22), 13);
+}
 
 fn tampered_instance(f: &Fixture, tamper: impl FnOnce(&mut Instance)) -> Instance {
     let mut instance = Instance {

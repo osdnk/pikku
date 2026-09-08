@@ -1,13 +1,12 @@
 use rokoko::common::config::DEGREE;
 
 pub(crate) const DEFAULT_LOG_M: usize = 20;
-// Ranks from the practical estimates: 16 sequential folds with coefficients
-// sampled uniformly from [-2^3, 2^3].
+// Ranks from the practical estimates: 32 sequential folds with coefficients
+// sampled uniformly from [-2^10, 2^10].
 pub(crate) fn commitment_rank(m: usize) -> usize {
     match m.ilog2() {
-        ..=18 => 14,
-        19..=20 => 15,
-        _ => 16,
+        ..=20 => 12,
+        _ => 13,
     }
 }
 pub(crate) const FRESH_INPUTS: usize = 2;
@@ -16,7 +15,7 @@ pub(crate) const FOLD_INPUTS: usize = FRESH_INPUTS + ACCUMULATORS;
 pub(crate) const ACCUMULATOR_COL: usize = FRESH_INPUTS;
 pub(crate) const FRESH_SELECTOR_VARS: usize = FRESH_INPUTS.ilog2() as usize;
 const _: () = assert!(FRESH_INPUTS.is_power_of_two());
-pub(crate) const WITNESS_COEFF_BOUND: u64 = 1 << 3;
+pub(crate) const WITNESS_COEFF_BOUND: u64 = 1 << 10;
 pub(crate) const FOLD_CHALLENGE_WEIGHT: usize = 23;
 pub(crate) const FOLD_CHALLENGE_OP_NORM_BOUND: f64 = 8.357;
 pub(crate) const FOLD_CHALLENGE_LABEL: &[u8] = b"pikku-fold-fixed-weight-challenge";

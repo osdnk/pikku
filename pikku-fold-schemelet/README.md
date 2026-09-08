@@ -7,11 +7,11 @@ claims.
 Defaults:
 
 - `m = 2^20`
-- `rank = 15`
+- `rank = 12`
 - Rokoko prime `q = 1125899906839937`
 - two fresh inputs plus one accumulator
-- witness coefficients sampled uniformly from `[-2^3, 2^3]`
-- commitment ranks account for 16 sequential folding rounds
+- witness coefficients sampled uniformly from `[-2^10, 2^10]`
+- commitment ranks account for 32 sequential folding rounds
 - unstructured dense commitment key sampled uniformly
 - fold challenges use the degree-128 fixed-weight sampler row
   `s = 23, gamma <= 8.357` from `easy_sampler.tex`, sampled with Rokoko's
