@@ -7,8 +7,8 @@ use rokoko::common::sumcheck_element::SumcheckElement;
 use rokoko::protocol::sumcheck_utils::common::{HighOrderSumcheckData, SumcheckBaseData};
 use rokoko::protocol::sumcheck_utils::elephant_cell::ElephantCell;
 use rokoko::protocol::sumcheck_utils::linear::LinearSumcheck;
+use rokoko::protocol::sumcheck_utils::combiner::Combiner;
 use rokoko::protocol::sumcheck_utils::polynomial::Polynomial;
-use rokoko::protocol::sumcheck_utils::ring_to_field_combiner::RingToFieldCombiner;
 
 pub(crate) fn claim_batching_challenges(transcript: &mut HashWrapper) -> Vec<RingElement> {
     let sampled = PROJECTION_BATCH_POINTS + FRESH_INPUTS;
@@ -66,26 +66,32 @@ pub(crate) fn round_challenge(transcript: &mut HashWrapper) -> (QuadraticExtensi
 
 pub(crate) struct SumcheckExecution {
     pub(crate) round_polynomials: Vec<[QuadraticExtension; 2]>,
+    pub(crate) field_points: Vec<QuadraticExtension>,
 }
 
 pub(crate) fn execute_sumcheck_prover(
-    field_combiner: &RingToFieldCombiner,
-    leaves: &[ElephantCell<LinearSumcheck<RingElement>>],
+    combiner: &Combiner<QuadraticExtension>,
+    leaves: &[ElephantCell<LinearSumcheck<QuadraticExtension>>],
     rounds: usize,
     transcript: &mut HashWrapper,
 ) -> SumcheckExecution {
     let mut round_polynomials = Vec::with_capacity(rounds);
+    let mut field_points = Vec::with_capacity(rounds);
     for _ in 0..rounds {
         let mut poly = Polynomial::<QuadraticExtension>::new(0);
-        field_combiner.univariate_polynomial_into(&mut poly);
+        combiner.univariate_polynomial_into(&mut poly);
         transcript.update_with_quadratic_extension_slice(&poly.coefficients);
-        let (_, ring_value) = round_challenge(transcript);
+        let (field_value, _) = round_challenge(transcript);
         for leaf in leaves {
-            leaf.borrow_mut().partial_evaluate(&ring_value);
+            leaf.borrow_mut().partial_evaluate(&field_value);
         }
         round_polynomials.push([poly.coefficients[0], poly.coefficients[2]]);
+        field_points.push(field_value);
     }
-    SumcheckExecution { round_polynomials }
+    SumcheckExecution {
+        round_polynomials,
+        field_points,
+    }
 }
 
 pub(crate) struct VerifiedSumcheck {
