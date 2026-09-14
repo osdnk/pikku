@@ -4,6 +4,7 @@ mod commitment;
 mod config;
 mod eval;
 mod eval_claims;
+mod field_sumcheck;
 mod fold;
 mod output;
 mod proj_sumcheck;

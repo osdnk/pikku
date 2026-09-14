@@ -18,7 +18,6 @@ pub(crate) fn one_minus(value: &RingElement) -> RingElement {
     out
 }
 
-#[allow(dead_code)]
 pub(crate) fn expand_eq_qe(layers_msb: &[QuadraticExtension]) -> Vec<QuadraticExtension> {
     PreprocessedRow::from_layers(layers_msb).preprocessed_row
 }
