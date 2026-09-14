@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rokoko = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", branch = "main" }
-incomplete-rexl = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", branch = "main" }
+rokoko = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", rev = "58da08bdb4489d4ca57f00c90595c3d58484d052" }
+incomplete-rexl = { git = "ssh://git@github.com/lattice-arguments/rokoko.git", rev = "58da08bdb4489d4ca57f00c90595c3d58484d052" }
 rand = "0.9.2"
 
 [features]

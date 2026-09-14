@@ -12,7 +12,8 @@ pub(crate) fn verify_output(
     claim: &EvalClaim,
     norm_bound: f64,
 ) -> Result<std::time::Duration, String> {
-    let (recomputed, derivation) = commitment_key.commit(witness);
+    let (recomputed, derivation) =
+        commitment_key.commit(witness, crate::config::folded_coeff_bound());
     for (row, expected) in commitment.iter().enumerate() {
         if recomputed[(row, 0)] != *expected {
             return Err("folded commitment mismatch".to_string());
