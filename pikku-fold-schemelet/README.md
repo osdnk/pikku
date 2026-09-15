@@ -69,8 +69,7 @@ the stage-C passes over the fresh columns use `vpdpwssd` on that same i16
 copy with the residues split into 13-bit chunks, the accumulator column,
 the MLE claims and the commitment use IFMA with lazy 52-bit-half
 accumulation, and the fold is a Shoup IFMA kernel that writes its output
-once. The commitment is one pass over the key in incomplete NTT form for all
-columns at once.
+once, and the commitment is the same IFMA pass over the key.
 
 Run a smoke test:
 

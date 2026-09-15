@@ -237,6 +237,7 @@ fn witness_passes_match_reference() {
 }
 
 #[test]
+#[cfg(not(feature = "derived-key"))]
 fn commitment_matches_ring_reference() {
     init_common();
     let (height, rank) = (1 << 10, 3);

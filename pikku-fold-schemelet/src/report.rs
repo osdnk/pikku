@@ -95,7 +95,13 @@ pub(crate) fn print_report(
     println!("sample_ms = {:.3}", ms(timings.sample));
     println!("setup_ms = {:.3}", ms(timings.setup));
     println!("instance_ms = {:.3}", ms(timings.instance));
-    println!("  commit_ms = {:.3}", ms(timings.instance_parts.commit));
+    for (col, time) in timings.instance_parts.commit_columns.iter().enumerate() {
+        if col + 1 == timings.instance_parts.commit_columns.len() {
+            println!("  commit_acc_ms = {:.3}", ms(*time));
+        } else {
+            println!("  commit_input{col}_ms = {:.3}", ms(*time));
+        }
+    }
     println!("  claims_ms = {:.3}", ms(timings.instance_parts.claims));
     println!(
         "key_derivation_ms = {:.3}",
