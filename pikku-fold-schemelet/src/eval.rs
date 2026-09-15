@@ -1,20 +1,13 @@
-use rokoko::common::ring_arithmetic::{Representation, RingElement};
-use rokoko::common::structured_row::PreprocessedRow;
-use rokoko::protocol::open::evaluation_point_to_structured_row;
+use crate::field_sumcheck::diagonal_value;
+use crate::ifma::contract_pass;
+use crate::proj_sumcheck::embed_qe;
+use crate::qe_vec::expand_eq_soa;
+use rokoko::common::ring_arithmetic::{QuadraticExtension, RingElement};
 
-pub(crate) fn eq_table(point: &[RingElement]) -> Vec<RingElement> {
-    PreprocessedRow::from_structured_row(&evaluation_point_to_structured_row(point))
-        .preprocessed_row
-}
-
+// The point is diagonal, so the eq table is F_{q^2}-valued.
 pub(crate) fn mle_evaluate(values: &[RingElement], point: &[RingElement]) -> RingElement {
     assert_eq!(values.len(), 1 << point.len());
-    let table = eq_table(point);
-    let mut acc = RingElement::zero(Representation::IncompleteNTT);
-    let mut tmp = RingElement::zero(Representation::IncompleteNTT);
-    for (value, weight) in values.iter().zip(&table) {
-        tmp *= (value, weight);
-        acc += &tmp;
-    }
-    acc
+    let layers: Vec<QuadraticExtension> = point.iter().map(diagonal_value).collect();
+    let alpha = embed_qe(&QuadraticExtension { coeffs: [0, 1] });
+    unsafe { contract_pass(values, &expand_eq_soa(&layers), &alpha) }.remove(0)
 }

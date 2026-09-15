@@ -14,7 +14,7 @@ pub(crate) fn diagonal_value(element: &RingElement) -> QuadraticExtension {
     let mut homogenized = element.clone();
     homogenized.from_incomplete_ntt_to_homogenized_field_extensions();
     let slots = homogenized.split_into_quadratic_extensions();
-    debug_assert!(slots.iter().all(|slot| *slot == slots[0]));
+    assert!(slots.iter().all(|slot| *slot == slots[0]));
     slots[0]
 }
 
@@ -51,6 +51,30 @@ impl SlotBatcher {
         SlotBatcher { rows }
     }
 
+    // Phi_delta on even-odd coefficient vectors.
+    pub(crate) fn coefficient_rows(
+        delta: &[QuadraticExtension; HALF_DEGREE],
+    ) -> [[u64; DEGREE]; 2] {
+        let mut rows = [[0u64; DEGREE]; 2];
+        for k in 0..DEGREE {
+            let mut unit = RingElement::zero(Representation::IncompleteNTT);
+            unit.from_incomplete_ntt_to_even_odd_coefficients();
+            unit.v[k] = 1;
+            unit.from_even_odd_coefficients_to_incomplete_ntt_representation();
+            let image = slot_batch(&unit, delta);
+            rows[0][k] = image.coeffs[0];
+            rows[1][k] = image.coeffs[1];
+        }
+        rows
+    }
+
+    pub(crate) fn rows(&self) -> [[u64; DEGREE]; 2] {
+        [
+            self.rows[0].as_slice().try_into().unwrap(),
+            self.rows[1].as_slice().try_into().unwrap(),
+        ]
+    }
+
     pub(crate) fn apply(&self, element: &RingElement) -> QuadraticExtension {
         debug_assert!(element.representation == Representation::IncompleteNTT);
         let mut products = [0u64; DEGREE];
@@ -60,10 +84,6 @@ impl SlotBatcher {
             *limb = products.iter().sum::<u64>() % MOD_Q;
         }
         QuadraticExtension { coeffs }
-    }
-
-    pub(crate) fn apply_all(&self, elements: &[RingElement]) -> Vec<QuadraticExtension> {
-        elements.iter().map(|element| self.apply(element)).collect()
     }
 }
 
@@ -82,7 +102,10 @@ pub(crate) fn evaluate_column(values: &[RingElement], eq: &QeVec) -> RingElement
     let mut out = RingElement::zero(Representation::IncompleteNTT);
     let mut alpha_part = RingElement::zero(Representation::IncompleteNTT);
     alpha_part.v.copy_from_slice(&acc[1]);
-    out *= (&alpha_part, &embed_qe(&QuadraticExtension { coeffs: [0, 1] }));
+    out *= (
+        &alpha_part,
+        &embed_qe(&QuadraticExtension { coeffs: [0, 1] }),
+    );
     let mut plain = RingElement::zero(Representation::IncompleteNTT);
     plain.v.copy_from_slice(&acc[0]);
     out += &plain;

@@ -48,14 +48,29 @@ then both parties fold. The prover runs the witness rounds over `F_{q^2}`:
 the evaluation points, batching challenges, layer eq tables and round
 challenges are all diagonal ring elements and commute with slot batching, so
 the witness columns are slot-batched once (the ring factor `t_1(r_2)` of the
-projection term is folded into the batching vector) and the per-column ring
-terminal values come from one direct pass over the witness. Then both
-parties fold: the folded instance carries the terminal sumcheck
-point and the fold-challenge combination of the terminal evaluations. The
+projection term is folded into the batching vector). Every unbound variable
+is summed over the cube, so the low (column) rounds run on the tables
+contracted over the top block variables, which are `2^15` entries at the
+default size; one ring pass at the low point then yields both the
+top-round tables (slot batching is linear) and, after the top rounds, the
+per-column ring terminal values. Then both parties fold: the folded
+instance carries the terminal sumcheck point and the fold-challenge
+combination of the terminal evaluations. The
 final verification of the folded relation (`output.rs`) recomputes the
 folded commitment, checks the folded witness norm against
 `beta_acc + k * gamma * beta_in`, and re-evaluates the folded MLE claim; it
 is reported separately from verifier timing.
+
+Prover kernels (`coarse_layers.rs`, `ifma.rs`, `vnni.rs`), single-threaded:
+the first coarse layer works on the i16 coefficient copy of the fresh
+columns with the 40 signed combinations of every four elements precomputed
+per L2 tile, the second accumulates in i64 on the first layer's i32 image,
+the stage-C passes over the fresh columns use `vpdpwssd` on that same i16
+copy with the residues split into 13-bit chunks, the accumulator column,
+the MLE claims and the commitment use IFMA with lazy 52-bit-half
+accumulation, and the fold is a Shoup IFMA kernel that writes its output
+once. The commitment is one pass over the key in incomplete NTT form for all
+columns at once.
 
 Run a smoke test:
 

@@ -4,10 +4,10 @@ use rokoko::common::config::HALF_DEGREE;
 use rokoko::common::hash::HashWrapper;
 use rokoko::common::ring_arithmetic::{QuadraticExtension, Representation, RingElement};
 use rokoko::common::sumcheck_element::SumcheckElement;
+use rokoko::protocol::sumcheck_utils::combiner::Combiner;
 use rokoko::protocol::sumcheck_utils::common::{HighOrderSumcheckData, SumcheckBaseData};
 use rokoko::protocol::sumcheck_utils::elephant_cell::ElephantCell;
 use rokoko::protocol::sumcheck_utils::linear::LinearSumcheck;
-use rokoko::protocol::sumcheck_utils::combiner::Combiner;
 use rokoko::protocol::sumcheck_utils::polynomial::Polynomial;
 
 pub(crate) fn claim_batching_challenges(transcript: &mut HashWrapper) -> Vec<RingElement> {

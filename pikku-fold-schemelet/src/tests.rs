@@ -174,26 +174,100 @@ fn tampered_batched_projection_fails_trace_check() {
 }
 
 #[test]
-fn first_coarse_projection_matches_reference() {
-    use crate::coarse_projection::project_first_coarse;
-    use crate::projection::projection_shape;
-    use rokoko::common::matrix::VerticallyAlignedMatrix;
-    use rokoko::common::projection_matrix::ProjectionMatrix;
+fn coarse_layers_match_ring_reference() {
+    use crate::projection::{project_witness, projection_shape, sample_projection_matrices};
     use rokoko::protocol::project_coarse::project_ring;
     let f = &*FIXTURE;
     let ratios = projection_shape(f.m).unwrap();
-    let mut matrix = ProjectionMatrix::new(ratios[0], crate::config::PROJECTION_ROWS);
     let mut sampler = rokoko::common::hash::HashWrapper::new();
-    matrix.sample(&mut sampler);
+    let matrices = sample_projection_matrices(&ratios, &mut sampler);
+    let (levels, _, _) = project_witness(&f.witness, &matrices);
     let input = VerticallyAlignedMatrix {
         data: f.witness.data[..crate::config::FRESH_INPUTS * f.m].to_vec(),
         width: 1,
         height: crate::config::FRESH_INPUTS * f.m,
         used_cols: 1,
     };
-    let fast = project_first_coarse(&input, &matrix);
-    let reference = project_ring(&input, &matrix);
-    assert_eq!(fast.data, reference.data);
+    let level0 = project_ring(&input, &matrices[0]);
+    assert_eq!(levels[0].data, level0.data);
+    let level1 = project_ring(&levels[0], &matrices[1]);
+    assert_eq!(levels[1].data, level1.data);
+}
+
+#[test]
+fn witness_passes_match_reference() {
+    use crate::coarse_layers::prepare_i16;
+    use crate::field_sumcheck::{evaluate_column, SlotBatcher};
+    use crate::ifma::{contract_pass, dot_rows_pass};
+    use crate::proj_sumcheck::embed_qe;
+    use crate::qe_vec::expand_eq_soa;
+    use crate::sumcheck::slot_batching_challenges;
+    use crate::vnni::{contract_i16, dot_rows_i16};
+    use rokoko::common::hash::HashWrapper;
+    use rokoko::common::ring_arithmetic::QuadraticExtension;
+    use rokoko::common::sumcheck_element::SumcheckElement;
+    init_common();
+    let mut sampler = HashWrapper::new();
+    let delta = slot_batching_challenges(&mut sampler);
+    let batcher = SlotBatcher::new(&delta);
+    let elements: Vec<RingElement> = (0..1 << 10)
+        .map(|_| RingElement::random_bounded(Representation::IncompleteNTT, WITNESS_COEFF_BOUND))
+        .collect();
+    let elements_16 = prepare_i16(&elements);
+    let [r0, r1] = unsafe { dot_rows_pass(&elements, &batcher.rows()) };
+    let [c0, c1] = unsafe { dot_rows_i16(&elements_16, &SlotBatcher::coefficient_rows(&delta)) };
+    for (x, element) in elements.iter().enumerate() {
+        let expected = batcher.apply(element);
+        assert_eq!([r0[x], r1[x]], expected.coeffs);
+        assert_eq!([c0[x], c1[x]], expected.coeffs);
+    }
+    let mut layers = vec![QuadraticExtension::zero(); 8];
+    for layer in layers.iter_mut() {
+        sampler.sample_field_element_into(layer);
+    }
+    let weights = expand_eq_soa(&layers);
+    let alpha = embed_qe(&QuadraticExtension { coeffs: [0, 1] });
+    let contracted = unsafe { contract_pass(&elements, &weights, &alpha) };
+    let contracted_16 = unsafe { contract_i16(&elements_16, &weights, &alpha) };
+    for (t, block) in elements.chunks_exact(weights.len()).enumerate() {
+        let expected = evaluate_column(block, &weights);
+        assert_eq!(contracted[t], expected);
+        assert_eq!(contracted_16[t], expected);
+    }
+}
+
+#[test]
+fn commitment_matches_ring_reference() {
+    init_common();
+    let (height, rank) = (1 << 10, 3);
+    let key = CommitmentKey::sample(height, rank);
+    let witness = sample_witness(height);
+    let (commitment, _) = key.commit(&witness);
+    let mut tmp = RingElement::zero(Representation::IncompleteNTT);
+    for row in 0..rank {
+        for col in 0..witness.used_cols {
+            let mut expected = RingElement::zero(Representation::IncompleteNTT);
+            for (a, w) in key.rows[row * height..][..height]
+                .iter()
+                .zip(witness.col(col))
+            {
+                tmp *= (a, w);
+                expected += &tmp;
+            }
+            assert_eq!(commitment[(row, col)], expected);
+        }
+    }
+}
+
+#[test]
+fn fold_pass_matches_ring_fold() {
+    use crate::fold::{fold_challenges, fold_witness};
+    let f = &*FIXTURE;
+    let mut sampler = rokoko::common::hash::HashWrapper::new();
+    let challenges = fold_challenges(&mut sampler);
+    let folded = fold_witness(&f.witness, &challenges);
+    let reference = rokoko::protocol::fold::fold(&f.witness, &challenges);
+    assert_eq!(folded.data, reference.data);
 }
 
 #[test]

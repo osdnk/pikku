@@ -1,3 +1,5 @@
+#[cfg(not(feature = "derived-key"))]
+use crate::ifma::commit_pass;
 use rokoko::common::matrix::{HorizontallyAlignedMatrix, VerticallyAlignedMatrix};
 use rokoko::common::ring_arithmetic::{Representation, RingElement};
 #[cfg(not(feature = "derived-key"))]
@@ -9,7 +11,7 @@ const DERIVE_CHUNK: usize = 4096;
 
 pub(crate) struct CommitmentKey {
     #[cfg(not(feature = "derived-key"))]
-    rows: Vec<RingElement>,
+    pub(crate) rows: Vec<RingElement>,
     height: usize,
     rank: usize,
 }
@@ -27,21 +29,6 @@ impl CommitmentKey {
     #[cfg(feature = "derived-key")]
     pub(crate) fn sample(height: usize, rank: usize) -> Self {
         CommitmentKey { height, rank }
-    }
-
-    #[cfg(not(feature = "derived-key"))]
-    pub(crate) fn commit_column(&self, column: &[RingElement]) -> (Vec<RingElement>, Duration) {
-        assert_eq!(column.len(), self.height);
-        let mut out = vec![RingElement::zero(Representation::IncompleteNTT); self.rank];
-        let mut tmp = RingElement::zero(Representation::IncompleteNTT);
-        for (row, acc) in out.iter_mut().enumerate() {
-            let key_row = &self.rows[row * self.height..(row + 1) * self.height];
-            for (key, value) in key_row.iter().zip(column) {
-                tmp *= (key, value);
-                *acc += &tmp;
-            }
-        }
-        (out, Duration::ZERO)
     }
 
     #[cfg(feature = "derived-key")]
@@ -73,6 +60,25 @@ impl CommitmentKey {
         (out, derivation)
     }
 
+    // One IFMA pass over the key, every key element read once for all columns.
+    #[cfg(not(feature = "derived-key"))]
+    pub(crate) fn commit(
+        &self,
+        witness: &VerticallyAlignedMatrix<RingElement>,
+    ) -> (HorizontallyAlignedMatrix<RingElement>, Duration) {
+        assert_eq!(witness.height, self.height);
+        let width = witness.used_cols;
+        let columns: Vec<&[RingElement]> = (0..width).map(|col| witness.col(col)).collect();
+        let data = unsafe { commit_pass(&self.rows, self.height, self.rank, &columns) };
+        let commitment = HorizontallyAlignedMatrix {
+            data,
+            width,
+            height: self.rank,
+        };
+        (commitment, Duration::ZERO)
+    }
+
+    #[cfg(feature = "derived-key")]
     pub(crate) fn commit(
         &self,
         witness: &VerticallyAlignedMatrix<RingElement>,

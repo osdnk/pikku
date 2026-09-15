@@ -1,4 +1,6 @@
-use crate::coarse_projection::project_first_coarse;
+use crate::coarse_layers::{
+    lift_i32, lift_i64, prepare_i16, project_layer0, project_layer1, Layer0Plan,
+};
 use crate::config::{FRESH_INPUTS, PROJECTION_BATCH_POINTS, PROJECTION_LAYERS, PROJECTION_ROWS};
 use rokoko::common::arithmetic::{
     centered_i64_from_u64_mod_q_scalar, inner_product, precompute_structured_values_fast,
@@ -9,7 +11,7 @@ use rokoko::common::matrix::VerticallyAlignedMatrix;
 use rokoko::common::projection_matrix::ProjectionMatrix;
 use rokoko::common::ring_arithmetic::RingElement;
 use rokoko::hexl::bindings::{eltwise_mult_mod, eltwise_reduce_mod};
-use rokoko::protocol::project_coarse::project_ring;
+use rokoko::protocol::project_coarse::Signed16RingElement;
 use rokoko::protocol::project_fine::{compute_j_batched_collectively, project_coefficients};
 
 pub(crate) const TRACE_RING_LEN: usize = PROJECTION_ROWS / DEGREE;
@@ -54,36 +56,19 @@ pub(crate) fn sample_projection_matrices(
 pub(crate) fn project_witness(
     witness: &VerticallyAlignedMatrix<RingElement>,
     matrices: &[ProjectionMatrix],
-) -> (Vec<VerticallyAlignedMatrix<RingElement>>, Vec<RingElement>) {
+) -> (
+    Vec<VerticallyAlignedMatrix<RingElement>>,
+    Vec<RingElement>,
+    Vec<Signed16RingElement>,
+) {
     let m = witness.height;
-    let mut current = VerticallyAlignedMatrix {
-        data: witness.data[..FRESH_INPUTS * m].to_vec(),
-        width: 1,
-        height: FRESH_INPUTS * m,
-        used_cols: 1,
-    };
-    let mut levels = Vec::with_capacity(PROJECTION_LAYERS - 1);
-    for (layer, matrix) in matrices[..PROJECTION_LAYERS - 1].iter().enumerate() {
-        let projected = if layer == 0 {
-            project_first_coarse(&current, matrix)
-        } else {
-            project_ring(&current, matrix)
-        };
-        current = VerticallyAlignedMatrix {
-            height: projected.height * projected.width,
-            width: 1,
-            used_cols: 1,
-            data: projected.data,
-        };
-        levels.push(VerticallyAlignedMatrix {
-            data: current.data.clone(),
-            width: 1,
-            height: current.height,
-            used_cols: 1,
-        });
-    }
-    let trace = project_coefficients(&current, &matrices[PROJECTION_LAYERS - 1]);
-    (levels, trace.data)
+    let witness_16 = prepare_i16(&witness.data[..FRESH_INPUTS * m]);
+    let plan = Layer0Plan::new(&matrices[0]);
+    let image0 = project_layer0(&witness_16, &plan);
+    let image1 = project_layer1(&image0, &matrices[1]);
+    let levels = vec![lift_i32(&image0), lift_i64(&image1)];
+    let trace = project_coefficients(&levels[1], &matrices[PROJECTION_LAYERS - 1]);
+    (levels, trace.data, witness_16)
 }
 
 pub(crate) fn sample_batching_tensors(transcript: &mut HashWrapper) -> Vec<Vec<u64>> {
