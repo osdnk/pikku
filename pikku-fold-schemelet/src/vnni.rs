@@ -85,6 +85,7 @@ pub(crate) unsafe fn contract_i16(
     let len = weights.len();
     assert_eq!(elements.len() % len, 0);
     assert_eq!(len % FLUSH, 0);
+    assert!(len <= 1 << 36);
     let chunk_weights: [[Vec<u32>; CHUNKS]; 2] = std::array::from_fn(|limb| {
         let limb_values = if limb == 0 {
             &weights.limb0
@@ -155,7 +156,7 @@ pub(crate) unsafe fn contract_i16(
                 for p in 0..16 {
                     let lane = 32 * (b / 2) + 8 * (p / 4) + 4 * (b % 2) + p % 4;
                     let sums: [i64; CHUNKS] = std::array::from_fn(|j| wide[limb][j][16 * b + p]);
-                    parts[limb].v[lane] = combine_chunks(sums, 40);
+                    parts[limb].v[lane] = combine_chunks(sums, 60);
                 }
             }
             parts[limb].from_even_odd_coefficients_to_incomplete_ntt_representation();

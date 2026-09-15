@@ -261,6 +261,36 @@ fn commitment_matches_ring_reference() {
 }
 
 #[test]
+#[cfg(feature = "derived-key")]
+fn derived_commitment_matches_ring_reference() {
+    use rokoko::common::sampling::{AesCtrPublicSampler, PUBLIC_CRS_SEED};
+    init_common();
+    let (height, rank) = (1 << 11, 3);
+    let key = CommitmentKey::sample(height, rank);
+    let witness = sample_witness(height);
+    let (commitment, _) = key.commit(&witness);
+    let mut tmp = RingElement::zero(Representation::IncompleteNTT);
+    for row in 0..rank {
+        let mut seed = PUBLIC_CRS_SEED.to_vec();
+        seed.extend_from_slice(b"row");
+        seed.extend_from_slice(&(row as u64).to_le_bytes());
+        let mut sampler = AesCtrPublicSampler::from_seed(&seed);
+        let mut key_row = vec![RingElement::zero(Representation::IncompleteNTT); height];
+        for element in key_row.iter_mut() {
+            sampler.fill_ring_element(element, Representation::IncompleteNTT);
+        }
+        for col in 0..witness.used_cols {
+            let mut expected = RingElement::zero(Representation::IncompleteNTT);
+            for (a, w) in key_row.iter().zip(witness.col(col)) {
+                tmp *= (a, w);
+                expected += &tmp;
+            }
+            assert_eq!(commitment[(row, col)], expected);
+        }
+    }
+}
+
+#[test]
 fn fold_pass_matches_ring_fold() {
     use crate::fold::{fold_challenges, fold_witness};
     let f = &*FIXTURE;
