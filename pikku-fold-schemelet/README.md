@@ -61,15 +61,25 @@ folded commitment, checks the folded witness norm against
 `beta_acc + k * gamma * beta_in`, and re-evaluates the folded MLE claim; it
 is reported separately from verifier timing.
 
-Prover kernels (`coarse_layers.rs`, `ifma.rs`, `vnni.rs`), single-threaded:
-the first coarse layer works on the i16 coefficient copy of the fresh
-columns with the 40 signed combinations of every four elements precomputed
-per L2 tile, the second accumulates in i64 on the first layer's i32 image,
-the stage-C passes over the fresh columns use `vpdpwssd` on that same i16
-copy with the residues split into 13-bit chunks, the accumulator column,
-the MLE claims and the commitment use IFMA with lazy 52-bit-half
-accumulation, and the fold is a Shoup IFMA kernel that writes its output
-once, and the commitment is the same IFMA pass over the key.
+Prover kernels, all single-threaded (`coarse_layers.rs`, `ifma.rs`,
+`vnni.rs`):
+
+- The fresh columns are narrowed once to an i16 coefficient copy, which the
+  first coarse layer and the witness-round passes read.
+- First coarse layer: per L2 tile, the 40 signed combinations of every four
+  witness elements are precomputed in i16, so a row costs one add per group
+  of four instead of one per nonzero entry. The second layer accumulates in
+  i64 on the first layer's i32 image.
+- Witness rounds: the two passes over the fresh columns (slot batching, and
+  the partial evaluation at the column point) run on the i16 copy with
+  `vpdpwssd`, the residues split into four 13-bit chunks and recombined
+  mod q once per output.
+- Everything on u64 ring elements (the accumulator column in those two
+  passes, the MLE claims, the commitment) is an IFMA pass with lazy
+  accumulation of the 52-bit product halves, reduced through
+  `q = 2^50 - 2687` once per 1024 terms.
+- Fold: Shoup/IFMA with the challenge precomputed, one row-outer pass that
+  writes the folded witness once with streaming stores.
 
 Run a smoke test:
 
