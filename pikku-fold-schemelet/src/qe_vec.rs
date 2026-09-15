@@ -13,6 +13,36 @@ impl QeVec {
         self.limb0.len()
     }
 
+    pub(crate) fn from_limbs(limb0: Vec<u64>, limb1: Vec<u64>) -> Self {
+        assert_eq!(limb0.len(), limb1.len());
+        QeVec { limb0, limb1 }
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<QuadraticExtension> {
+        (0..self.len()).map(|index| self.get(index)).collect()
+    }
+
+    // out[x] = sum_t weights[t] * self[t * len + x] with len = self.len() / weights.len().
+    pub(crate) fn contract_top(&self, weights: &[QuadraticExtension]) -> QeVec {
+        let len = self.len() / weights.len();
+        assert_eq!(len * weights.len(), self.len());
+        let mut limb0 = vec![0u64; len];
+        let mut limb1 = vec![0u64; len];
+        let mut scratch = vec![0u64; len];
+        for (t, weight) in weights.iter().enumerate() {
+            let w0 = weight.coeffs[0];
+            let w1 = weight.coeffs[1];
+            let alpha_w1 = unsafe { multiply_mod(*FIELD_SHIFT_FACTOR, w1, MOD_Q) };
+            let t0 = &self.limb0[t * len..(t + 1) * len];
+            let t1 = &self.limb1[t * len..(t + 1) * len];
+            eltwise_fma_mod(&mut scratch, t0, w0, &limb0, MOD_Q);
+            eltwise_fma_mod(&mut limb0, t1, alpha_w1, &scratch, MOD_Q);
+            eltwise_fma_mod(&mut scratch, t1, w0, &limb1, MOD_Q);
+            eltwise_fma_mod(&mut limb1, t0, w1, &scratch, MOD_Q);
+        }
+        QeVec { limb0, limb1 }
+    }
+
     pub(crate) fn get(&self, index: usize) -> QuadraticExtension {
         QuadraticExtension {
             coeffs: [self.limb0[index], self.limb1[index]],

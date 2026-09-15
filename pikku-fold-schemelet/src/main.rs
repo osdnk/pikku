@@ -1,11 +1,12 @@
 mod args;
-mod coarse_projection;
+mod coarse_layers;
 mod commitment;
 mod config;
 mod eval;
 mod eval_claims;
 mod field_sumcheck;
 mod fold;
+mod ifma;
 mod output;
 mod proj_sumcheck;
 mod projection;
@@ -18,7 +19,9 @@ mod sumcheck;
 mod tests;
 mod transcript;
 mod verifier;
+mod vnni;
 mod witness;
+mod witness_stage;
 
 use crate::args::parse_args;
 use crate::commitment::CommitmentKey;
@@ -43,6 +46,7 @@ fn main() {
 
 fn run(args: args::Args) -> Result<(), String> {
     init_common();
+    ifma::check_modulus();
     if args.log_m == 0 {
         return Err("log_m must be positive".to_string());
     }

@@ -1,9 +1,6 @@
-use crate::config::{
-    FOLD_INPUTS, FRESH_INPUTS, FRESH_SELECTOR_VARS, PROJECTION_BATCH_POINTS, PROJECTION_LAYERS,
-};
-use crate::eval_claims::{batched_claim, form_eval_claims};
-use crate::field_sumcheck::{delta_times, diagonal_value, evaluate_column, SlotBatcher};
-use crate::fold::fold_challenges;
+use crate::config::{FRESH_SELECTOR_VARS, PROJECTION_BATCH_POINTS, PROJECTION_LAYERS};
+use crate::eval_claims::batched_claim;
+use crate::fold::{fold_challenges, fold_witness};
 use crate::proj_sumcheck::{
     accumulate_j_columns, build_l0, expand_eq_qe, one_minus, scaled_embedded_table,
 };
@@ -14,17 +11,14 @@ use crate::projection::{
 use crate::qe_vec::expand_eq_soa;
 use crate::statement::Instance;
 use crate::sumcheck::{
-    claim_batching_challenges, execute_sumcheck_prover, round_challenge, slot_batch_poly,
-    slot_batching_challenges,
+    claim_batching_challenges, round_challenge, slot_batch_poly, slot_batching_challenges,
 };
 use crate::transcript::statement_transcript;
+use crate::witness_stage::run_witness_stage;
 use rokoko::common::config::HALF_DEGREE;
 use rokoko::common::hash::HashWrapper;
 use rokoko::common::matrix::VerticallyAlignedMatrix;
 use rokoko::common::ring_arithmetic::{QuadraticExtension, Representation, RingElement};
-use rokoko::common::sumcheck_element::SumcheckElement;
-use rokoko::protocol::fold::fold;
-use rokoko::protocol::sumcheck_utils::combiner::Combiner;
 use rokoko::protocol::sumcheck_utils::common::{HighOrderSumcheckData, SumcheckBaseData};
 use rokoko::protocol::sumcheck_utils::elephant_cell::ElephantCell;
 use rokoko::protocol::sumcheck_utils::linear::LinearSumcheck;
@@ -105,7 +99,7 @@ pub(crate) fn prove_fold(
     let projection_start = std::time::Instant::now();
     let coarse_ratios = projection_shape(m)?;
     let matrices = sample_projection_matrices(&coarse_ratios, &mut transcript);
-    let (mut levels, projection_trace) = project_witness(witness, &matrices);
+    let (mut levels, projection_trace, witness_16) = project_witness(witness, &matrices);
     transcript.update_with_ring_element_slice(&projection_trace);
     let tensors = sample_batching_tensors(&mut transcript);
     let j_batched = j_batched_vectors(&matrices[PROJECTION_LAYERS - 1], &tensors);
@@ -121,7 +115,6 @@ pub(crate) fn prove_fold(
     let (proj_batching, eval_batching) = batching.split_at(PROJECTION_BATCH_POINTS);
 
     let padded_eval_sum = batched_claim(instance, eval_batching);
-    let gadgets = form_eval_claims(m, instance, witness, eval_batching, &delta);
 
     let mut gamma = RingElement::constant(1, Representation::IncompleteNTT);
     let output_vars = matrices[PROJECTION_LAYERS - 1].projection_height.ilog2() as usize;
@@ -182,71 +175,34 @@ pub(crate) fn prove_fold(
     // the top log2(r_0) bits on both boundaries. eqB and S stay separate
     // product factors: collapsing either into the witness table would change
     // the multilinear extension off the cube and the verifier could no longer
-    // evaluate the terminal from the matrix description. One of the two is
-    // always in a dummy round, so the true round degree stays 2. The witness
-    // rounds run over F_{q^2} on the slot-batched witness; t_1(r_2) folds into
-    // delta, and the ring terminal values come from one pass over the witness.
+    // evaluate the terminal from the matrix description. The witness rounds
+    // themselves live in witness_stage.
     let t1_terminal = t1_leaf.borrow().final_evaluations().clone();
     let block_vars = middle_vars - output_vars;
-    let column_vars = witness_vars - block_vars;
     let r2_msb: Vec<QuadraticExtension> =
         field_points[output_vars..].iter().rev().cloned().collect();
     let s = accumulate_j_columns(&matrices[0], &expand_eq_soa(&r2_msb[block_vars..]));
-    let s_leaf = ElephantCell::new(LinearSumcheck::from_data_with_prefixed_sufixed_data(
-        (0..s.len()).map(|index| s.get(index)).collect(),
-        block_vars,
-        0,
-    ));
-    let block_leaf = ElephantCell::new(LinearSumcheck::from_data_with_prefixed_sufixed_data(
-        expand_eq_qe(&r2_msb[..block_vars]),
-        0,
-        column_vars,
-    ));
-    let witness_leaf = ElephantCell::new(LinearSumcheck::from_data(
-        SlotBatcher::new(&delta_times(&delta, &t1_terminal))
-            .apply_all(&witness.data[..FRESH_INPUTS * m]),
-    ));
-    let product_c = ElephantCell::new(ProductSumcheck::new(
-        ElephantCell::new(ProductSumcheck::new(s_leaf.clone(), block_leaf.clone())),
-        witness_leaf.clone(),
-    ));
-
-    let chain_children: Vec<
-        ElephantCell<dyn HighOrderSumcheckData<Element = QuadraticExtension>>,
-    > = vec![product_c, gadgets.combiner.clone()];
-    let mut final_combiner = Combiner::new(chain_children);
-    final_combiner.load_challenges_from(&[QuadraticExtension::one(), diagonal_value(&gamma)]);
-
-    let mut chain_leaves = vec![s_leaf, block_leaf, witness_leaf];
-    chain_leaves.extend(gadgets.leaves());
-    let execution = execute_sumcheck_prover(
-        &final_combiner,
-        &chain_leaves,
-        witness_vars,
+    let block_eq = expand_eq_qe(&r2_msb[..block_vars]);
+    let stage = run_witness_stage(
+        m,
+        instance,
+        witness,
+        &witness_16,
+        &s,
+        &block_eq,
+        &delta,
+        &t1_terminal,
+        eval_batching,
+        &gamma,
         &mut transcript,
     );
-    round_polynomials.extend(execution.round_polynomials);
-    drop(final_combiner);
-    drop(chain_leaves);
-    drop(gadgets);
-
-    let witness_point: Vec<QuadraticExtension> = execution
-        .field_points
-        .iter()
-        .rev()
-        .skip(FRESH_SELECTOR_VARS)
-        .cloned()
-        .collect();
-    let eq = expand_eq_soa(&witness_point);
-    let terminal_values: Vec<RingElement> = (0..FOLD_INPUTS)
-        .map(|col| evaluate_column(witness.col(col), &eq))
-        .collect();
-    transcript.update_with_ring_element_slice(&terminal_values);
+    round_polynomials.extend(stage.round_polynomials);
+    let terminal_values = stage.terminal_values;
     let sumcheck_time = sumcheck_start.elapsed();
 
     let fold_start = std::time::Instant::now();
     let challenges = fold_challenges(&mut transcript);
-    let folded_witness = fold(witness, &challenges);
+    let folded_witness = fold_witness(witness, &challenges);
     let fold_time = fold_start.elapsed();
     Ok(ProverMessage {
         proof: FoldProof {
