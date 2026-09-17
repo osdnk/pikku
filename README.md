@@ -12,17 +12,11 @@ scripts/                     Sage scripts for the remaining tables
 lattice-estimator/           submodule, pinned; used by estimates.ipynb
 ```
 
-Clone with the estimator submodule:
-
-```sh
-git clone --recurse-submodules git@github.com:osdnk/pikku.git
-```
 
 ## Rust
 
 Both crates depend on the `rokoko` and `incomplete-rexl` crates from
-`lattice-arguments/rokoko` over SSH, so building needs read access to that
-repository. The ring arithmetic is AVX-512-only and both `.cargo/config.toml`
+`lattice-arguments/rokoko`. The ring arithmetic is AVX-512-only and both `.cargo/config.toml`
 files build with `target-cpu=native`.
 
 - `pikku-fold-schemelet/` — folding, the layered random projection, and the
