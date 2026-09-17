@@ -63,7 +63,7 @@ dependencies = [
 [[package]]
 name = "incomplete-rexl"
 version = "0.1.0"
-source = "git+https://github.com/lattice-arguments/rokoko.git?branch=main#513c87bce42a3b85ba542abcf639c0634e53652b"
+source = "git+https://github.com/lattice-arguments/rokoko.git?rev=64a9cd49d7d5281b0e174556662ec283e2eb8b3d#64a9cd49d7d5281b0e174556662ec283e2eb8b3d"
 dependencies = [
  "rand",
 ]
