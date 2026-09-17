@@ -16,7 +16,6 @@ Defaults:
 - fold challenges use the degree-128 fixed-weight sampler row
   `s = 23, gamma <= 8.357` from `easy_sampler.tex`, sampled with Rokoko's
   parametrized `sample_fixed_weight_challenge_into`
-  (lattice-arguments/rokoko#90)
 
 The fresh witness columns are projected through three transcript-sampled
 biased-ternary JL layers of 256 rows each: two coarse ring-level layers with
